@@ -12,6 +12,7 @@
 #include <stdbool.h>
 #include <assert.h>
 #include <string.h>
+#include <sys/types.h>
 
 static off_t mapExe(uint32_t offset) {
   /*
