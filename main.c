@@ -13,7 +13,7 @@
 #include <assert.h>
 #include <string.h>
 
-static uint32_t mapExe(uint32_t offset) {
+static off_t mapExe(uint32_t offset) {
   /*
     From `objdump -x swep1rcr.exe` for the patched US version:
 
@@ -26,23 +26,28 @@ static uint32_t mapExe(uint32_t offset) {
     3 .rsrc         000017b8  00ece000  00ece000  000d3800  2**2
   */
 
-  if ((offset >= 0x00401000) && (offset < (0x00401000 + 0x000aa750))) {
-    // .text
-    offset -= 0x00401000;
-    offset += 0x00000400;
-  } else if ((offset >= 0x004ac000) && (offset < (0x004ac000 + 0x000054a2))) {
+  if (offset >= 0x00ed0000) {
+    // hack
+    offset -= 0x00ed0000;
+    offset += 0x000d5000;
+  } else if (offset >= 0x00ece000) {
+    // .rsrc
+    offset -= 0x00ece000;
+    offset += 0x000d3800;
+  } else if (offset >= 0x004b2000) {
+   // .data
+    offset -= 0x004b2000;
+    offset += 0x000b0200;
+  } else if (offset >= 0x004ac000) {
     // .rdata
     offset -= 0x004ac000;
     offset += 0x000aac00;
-  } else if ((offset >= 0x004b2000) && (offset < (0x004b2000 + 0x00023600))) {
-    offset -= 0x004b2000;
-    offset += 0x000b0200;
+  } else if (offset >= 0x00401000) {
+    // .text
+    offset -= 0x00401000;
+    offset += 0x00000400;
   } else {
-    // .rsrc or unsupported
     printf("Unknown offset: 0x%08X\n", offset);
-    //assert(false);
-    offset -= 0x00ece000;
-    offset += 0x000d3800;
   }
   return offset;
 }
@@ -224,17 +229,51 @@ static uint32_t patchTextureTable(FILE* f, uint32_t memory_offset, uint32_t offs
   return memory_offset;
 }
 
+static uint16_t read16(FILE* f, off_t offset) {
+  uint16_t value;
+  fseek(f, offset, SEEK_SET);
+  fread(&value, 2, 1, f);
+  return value;
+}
+
+static void write16(FILE* f, off_t offset, uint16_t value) {
+  fseek(f, offset, SEEK_SET);
+  fwrite(&value, 2, 1, f);
+  return;
+}
+
+static void patch16_add(FILE* f, off_t offset, uint16_t delta) {
+  write16(f, offset, read16(f, offset) + delta);
+  return;
+}
+
+static uint32_t read32(FILE* f, off_t offset) {
+  uint32_t value;
+  fseek(f, offset, SEEK_SET);
+  fread(&value, 4, 1, f);
+  return value;
+}
+
+static void write32(FILE* f, off_t offset, uint32_t value) {
+  fseek(f, offset, SEEK_SET);
+  fwrite(&value, 4, 1, f);
+  return;
+}
+
+static void patch32_add(FILE* f, off_t offset, uint32_t delta) {
+  write32(f, offset, read32(f, offset) + delta);
+  return;
+}
+
 int main(int argc, char* argv[]) {
 
   FILE* f = fopen(argv[1], "rb+");
   assert(f != NULL);
 
   // Read timestamp of binary to see which base version this is
-  uint32_t timestamp;
-  fseek(f, 216, SEEK_SET); //FIXME: Parse headers properly
-  fread(&timestamp, 4, 1, f);
+  uint32_t timestamp = read32(f, 216);
 
-  // Now set the correct pointers for this binary
+  //FIXME: Now set the correct pointers for this binary
   switch(timestamp) {
   case 0x3C60692C:
     break;
@@ -243,61 +282,76 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
+
   // Allocate more space, say... 4MB?
   // (we use the .rsrc section, which is last in memory)
   uint32_t patch_size = 4 * 1024 * 1024;
-  uint32_t image_base = 0x400000; // FIXME: Read
 
-  uint32_t memory_size;
-  uint32_t memory_offset;
-  fseek(f, 576 + 8, SEEK_SET);
-  fread(&memory_size, 4, 1, f);
-  fread(&memory_offset, 4, 1, f);
-  memory_offset += image_base;
 
-  uint32_t file_size;
-  uint32_t file_offset;
-  fread(&file_size, 4, 1, f);
-  fread(&file_offset, 4, 1, f);
+  // Get rough offset where we'll place our stuff
+  fseek(f, 0, SEEK_END);
+  uint32_t file_offset = ftell(f);
 
-  // Go to the end of each section
-  file_offset += file_size;
-  memory_offset += memory_size;
-
-  // Patchup the section size
-  file_size += patch_size;
-  memory_size += patch_size;
-
-  // Write the new size
-  fseek(f, 576 + 8, SEEK_SET);
-  fwrite(&memory_size, 4, 1, f);
-  fseek(f, 576 + 16, SEEK_SET);
-  fwrite(&file_size, 4, 1, f);
-
-  // Extend the file to the size
+  // Align offset to safe bound and create data
   fseek(f, file_offset, SEEK_SET);
-  while(ftell(f) < (file_offset + file_size)) {
+  file_offset = (file_offset + 0xFFF) & ~0xFFF;
+  while(ftell(f) < (file_offset + patch_size)) {
     uint8_t dummy = 0x00;
     fwrite(&dummy, 1, 1, f);
   }
 
-  // Fix section characteristics
-  uint32_t characteristics;
-  fseek(f, 576 + 36, SEEK_SET);
-  fread(&characteristics, 4, 1, f);
+  // Select a unused memory region and align it
+  uint32_t memory_offset = read32(f, 288);
+  memory_offset = (memory_offset + 0xFFF) & ~0xFFF;
+
+  // Create data for new section
+  uint32_t characteristics = 0;
+  characteristics |= 0x20; // Code
+  characteristics |= 0x40; // Initialized Data
   characteristics |= 0x20000000; // Executable
+  characteristics |= 0x40000000; // Readable
   characteristics |= 0x80000000; // Writeable
-  fseek(f, -4, SEEK_CUR);
-  fwrite(&characteristics, 4, 1, f);
 
-  printf("File offset: 0x%08X (Memory: 0x%08X, size = 0x%X/0x%X)\n", file_offset, memory_offset, file_size, memory_size);
+  // Append a new section
+  write32(f, 576 + 40 + 0, *(uint32_t*)"hack");
+  write32(f, 576 + 40 + 4, 0x00000000);
+  write32(f, 576 + 40 + 8, patch_size);
+  write32(f, 576 + 40 + 12, memory_offset);
+  write32(f, 576 + 40 + 16, patch_size);
+  write32(f, 576 + 40 + 20, file_offset);
+  write32(f, 576 + 40 + 24, 0x00000000);
+  write32(f, 576 + 40 + 28, 0x00000000);
+  write32(f, 576 + 40 + 32, 0x00000000);
+  write32(f, 576 + 40 + 36, characteristics);
+
+#if 1
+
+  // Increment number of sections
+  patch16_add(f, 214, 1);
+
+  // size of image
+  write32(f, 288, memory_offset + patch_size);
+
+  // size of code
+  patch32_add(f, 236, patch_size);
+
+  // size of intialized data
+  patch32_add(f, 240, patch_size);
+#endif
 
 
+  // Add image base
+  memory_offset += read32(f, 260);
+
+
+#if 1
   memory_offset = patchTextureTable(f, memory_offset, 0x4BF91C, 0x42D745, 0x42D753, 512, 1024, "font0");  
   memory_offset = patchTextureTable(f, memory_offset, 0x4BF7E4, 0x42D786, 0x42D794, 512, 1024, "font1");
   memory_offset = patchTextureTable(f, memory_offset, 0x4BF84C, 0x42D7C7, 0x42D7D5, 512, 1024, "font2");
   memory_offset = patchTextureTable(f, memory_offset, 0x4BF8B4, 0x42D808, 0x42D816, 512, 1024, "font3");
   //FIXME: font4
+#endif
+
 
 #if 0
   dumpTextureTable(f, 0x4BF91C, 3, 0, 64, 128, "font0");
