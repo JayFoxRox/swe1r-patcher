@@ -229,6 +229,19 @@ static uint32_t patchTextureTable(FILE* f, uint32_t memory_offset, uint32_t offs
   return memory_offset;
 }
 
+static uint8_t read8(FILE* f, off_t offset) {
+  uint8_t value;
+  fseek(f, offset, SEEK_SET);
+  fread(&value, 1, 1, f);
+  return value;
+}
+
+static void write8(FILE* f, off_t offset, uint8_t value) {
+  fseek(f, offset, SEEK_SET);
+  fwrite(&value, 1, 1, f);
+  return;
+}
+
 static uint16_t read16(FILE* f, off_t offset) {
   uint16_t value;
   fseek(f, offset, SEEK_SET);
@@ -359,6 +372,108 @@ int main(int argc, char* argv[]) {
   dumpTextureTable(f, 0x4BF84C, 3, 0, 64, 128, "font2");
   dumpTextureTable(f, 0x4BF8B4, 3, 0, 64, 128, "font3");
   dumpTextureTable(f, 0x4BF984, 3, 0, 64, 128, "font4");
+#endif
+
+#if 1
+  // Upgrade network play updates to 100%
+
+  // Patch the game GUID so people don't cheat with it (as easily):
+  fseek(f, mapExe(0x4AF9B0), SEEK_SET);
+  uint32_t mark_hack = 0x1337C0DE;
+  fwrite(&mark_hack, 4, 1, f);
+
+  // Important: Must be updated every time we change something in the network!
+  uint32_t version = 0x00000000;
+  fwrite(&version, 4, 1, f);
+  
+  // Configure upgrade for menu
+  uint8_t upgrade_levels[7]  = {    5,    5,    5,    5,    5,    5,    5 };
+  uint8_t upgrade_healths[7] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+  
+  // Now do the actual upgrade for menus
+  fseek(f, mapExe(0x45CFC6), SEEK_SET);
+  fwrite(&upgrade_levels[0], 1, 1, f);
+  fseek(f, mapExe(0x45CFCB), SEEK_SET);
+  fwrite(&upgrade_healths[0], 1, 1, f);
+
+  //FIXME: Upgrade network player creation
+
+  // 0x45B725 vs 0x45B9FF
+
+#if 0
+lea     edx, [esp+1Ch+upgrade_health]
+lea     eax, [esp+1Ch+upgrade_level]
+push    edx             ; upgrade_healths
+push    eax             ; upgrade_levels
+push    ebp             ; handling_in
+push    offset handling_out ; handling_out
+mov     [esp+esi+2Ch+upgrade_health], cl
+call    _sub_449D00_generate_upgraded_handling_table_data
+#endif
+
+// Place upgrade data in memory
+
+fseek(f, mapExe(memory_offset), SEEK_SET);
+
+uint32_t memory_offset_upgrade_levels = memory_offset;
+fwrite(upgrade_levels, 7, 1, f);
+memory_offset += 7;
+
+uint32_t memory_offset_upgrade_healths = memory_offset;
+fwrite(upgrade_healths, 7, 1, f);
+memory_offset += 7;
+
+
+// Now inject the code
+
+uint32_t memory_offset_upgrade_code = memory_offset;
+
+//  -> push edx
+write8(f, mapExe(memory_offset), 0x52); memory_offset += 1;
+
+//  -> push eax
+write8(f, mapExe(memory_offset), 0x50); memory_offset += 1;
+
+//  -> push offset upgrade_healths
+write8(f, mapExe(memory_offset), 0x68); memory_offset += 1;
+write32(f, mapExe(memory_offset), memory_offset_upgrade_healths); memory_offset += 4;
+
+//  -> push offset upgrade_levels
+write8(f, mapExe(memory_offset), 0x68); memory_offset += 1;
+write32(f, mapExe(memory_offset), memory_offset_upgrade_levels); memory_offset += 4;
+
+//  -> push esi
+write8(f, mapExe(memory_offset), 0x56); memory_offset += 1;
+
+//  -> push edi
+write8(f, mapExe(memory_offset), 0x57); memory_offset += 1;
+
+//  -> call _sub_449D00
+write8(f, mapExe(memory_offset), 0xE8); memory_offset += 1;
+write32(f, mapExe(memory_offset), 0x449D00 - (memory_offset + 4)); memory_offset += 4;
+
+//  -> add esp, 0x10
+write8(f, mapExe(memory_offset), 0x83); memory_offset += 1;
+write8(f, mapExe(memory_offset), 0xC4); memory_offset += 1;
+write8(f, mapExe(memory_offset), 0x10); memory_offset += 1;
+
+//  -> pop eax
+write8(f, mapExe(memory_offset), 0x58); memory_offset += 1;
+
+//  -> pop edx
+write8(f, mapExe(memory_offset), 0x5A); memory_offset += 1;
+
+//  -> retn
+write8(f, mapExe(memory_offset), 0xC3); memory_offset += 1;
+
+
+// Install it by jumping from 0x45B765 and returning to 0x45B76C
+
+write8(f, mapExe(0x45B765 + 0), 0xE8);
+write32(f, mapExe(0x45B765 + 1), memory_offset_upgrade_code - (0x45B765 + 5));
+write8(f, mapExe(0x45B765 + 5), 0x90);
+write8(f, mapExe(0x45B765 + 6), 0x90);
+
 #endif
 
   fclose(f);
