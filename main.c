@@ -477,6 +477,29 @@ write8(f, mapExe(0x45B765 + 6), 0x90);
 
 #endif
 
+#if 1
+
+  // Patch audio streaming quality
+
+  uint32_t samplerate = 22050 * 2;
+  uint8_t bits_per_sample = 16;
+  bool stereo = true;
+
+  // Calculate a fitting buffer-size
+  uint32_t buffer_size = 2 * samplerate * (bits_per_sample / 8) * (stereo ? 2 : 1);
+
+  // Patch audio stream source setting
+  write32(f, mapExe(0x423215), buffer_size);
+  write8(f, mapExe(0x42321A), bits_per_sample);
+  write32(f, mapExe(0x42321E), samplerate);
+
+  // Patch audio stream buffer chunk size
+  write32(f, mapExe(0x423549), buffer_size / 2);
+  write32(f, mapExe(0x42354E), buffer_size / 2);
+  write32(f, mapExe(0x423555), buffer_size / 2);
+
+#endif
+
   fclose(f);
 
   return 0;
