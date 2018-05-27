@@ -156,6 +156,12 @@ static uint32_t test_eax_eax(Target target, uint32_t memory_offset) {
   return memory_offset;
 }
 
+static uint32_t test_edx_edx(Target target, uint32_t memory_offset) {
+  write8(target, memory_offset, 0x85); memory_offset += 1;
+  write8(target, memory_offset, 0xD2); memory_offset += 1;
+  return memory_offset;
+}
+
 static uint32_t nop(Target target, uint32_t memory_offset) {
   write8(target, memory_offset, 0x90); memory_offset += 1;
   return memory_offset;
@@ -339,18 +345,62 @@ static uint32_t patchTextureTable(Target target, uint32_t memory_offset, uint32_
   return memory_offset;
 }
 
+static void modify_network_guid(Target target, const void* data, size_t size) {
+
+  // Patches the game GUID so people don't cheat with it (as easily)
+
+  if (size == 0) {
+    size = strlen(data);
+  }
+
+  #define SWAP(a, b) if (a ^ b) {a ^= b; b ^= a; a ^= b;}
+
+  static uint8_t s[256];
+  static bool initialized = false;
+  if (!initialized) {
+
+    // Initialize the RC4 S-Box
+    for (int i = 0; i < 256; i++) {
+      s[i] = i;
+    }
+
+    initialized = true;
+  }
+
+  // Modify the hash using RC4 schedule
+  assert(size <= 256);
+  const uint8_t* data_bytes = data;
+  uint8_t j = 0;
+  for (int i = 0; i < 256; i++) {
+    j += s[i] + data_bytes[i % size];
+    SWAP(s[i], s[j]);
+  }
+
+  // Emit 16 bytes of the keystream
+  uint8_t k_i = 0;
+  uint8_t k_j = 0;
+  uint8_t k_s[256];
+  memcpy(k_s, s, 256);
+  for(int i = 0; i < 16; i++) {
+    k_j += k_s[++k_i];
+    SWAP(k_s[k_i], k_s[k_j]);
+    uint8_t rc4_output = k_s[(k_s[k_i] + k_s[k_j]) & 0xFF];
+    write8(target, 0x4AF9B0 + i, rc4_output);
+  }
+
+  // Overwrite the first 2 byte with a version index, so we have room
+  // to fix the algorithm if we have messed up
+  write16(target, 0x4AF9B0 + 0, 0x00000000);
+
+  return;
+}
 
 static uint32_t patch_network_upgrades(Target target, uint32_t memory_offset, uint8_t* upgrade_levels, uint8_t* upgrade_healths) {
   // Upgrade network play updates to 100%
 
-  // Patch the game GUID so people don't cheat with it (as easily):
-
-  // Important: Must be updated every time we change something in the network!
-  uint32_t version = 0x00000000;
-  uint32_t mark_hack = 0x1337C0DE;
-
-  write32(target, 0x4AF9B0 + 0, mark_hack);
-  write32(target, 0x4AF9B0 + 4, version);
+  modify_network_guid(target, "Upgrades", 0);
+  modify_network_guid(target, upgrade_levels, 7);
+  modify_network_guid(target, upgrade_healths, 7);
 
   // The following patch only supports the same upgrade level and health for menus
   // So in order to keep everything synchronized, we assert that only one setting is present for all categories
@@ -438,6 +488,40 @@ static uint32_t patch_network_upgrades(Target target, uint32_t memory_offset, ui
   write32(target, 0x45B765 + 1, memory_offset_upgrade_code - (0x45B765 + 5));
   write8(target, 0x45B765 + 5, 0x90);
   write8(target, 0x45B765 + 6, 0x90);
+
+  return memory_offset;
+}
+
+static uint32_t patch_network_collisions(Target target, uint32_t memory_offset) {
+  // Disable collision between network players
+
+  modify_network_guid(target, "Collisions", 0);
+
+  // Inject the code
+
+  uint32_t memory_offset_collision_code = memory_offset;
+
+  memory_offset = push_edx(target, memory_offset);
+
+  // -> mov     edx, _dword_4D5E00_is_multiplayer
+  write8(target, memory_offset, 0x8B); memory_offset += 1;
+  write8(target, memory_offset, 0x15); memory_offset += 1;
+  write32(target, memory_offset, 0x4D5E00); memory_offset += 4;
+
+  memory_offset = test_edx_edx(target, memory_offset);
+  memory_offset = pop_edx(target, memory_offset);
+
+  // -> jz _sub_47B0C0
+  write8(target, memory_offset, 0x0F); memory_offset += 1;
+  write8(target, memory_offset, 0x84); memory_offset += 1;
+  write32(target, memory_offset, 0x47B0C0 - (memory_offset + 4)); memory_offset += 4;
+
+  memory_offset = retn(target, memory_offset);
+
+
+  // Install it by patching call at 0x47B5AF
+
+  write32(target, 0x47B5AF + 1, memory_offset_collision_code - (0x47B5AF + 5));
 
   return memory_offset;
 }
@@ -712,6 +796,10 @@ int main(int argc, char* argv[]) {
 #endif
 
 #if 1
+  memory_offset = patch_network_collisions(target, memory_offset);
+#endif
+
+#if 1
   uint32_t samplerate = 22050 * 2;
   uint8_t bits_per_sample = 16;
   bool stereo = true;
@@ -722,6 +810,14 @@ int main(int argc, char* argv[]) {
 #if 1
   memory_offset = patch_sprite_loader_to_load_tga(target, memory_offset);
 #endif
+
+  // Dump out the network GUID
+
+  printf("Network GUID is: ");
+  for(int i = 0; i < 16; i++) {
+    printf("%02X", read8(target, 0x4AF9B0 + i));
+  }
+  printf("\n");
 
 #ifdef LOADER
 
