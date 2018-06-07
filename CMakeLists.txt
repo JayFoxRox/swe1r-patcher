@@ -16,6 +16,6 @@ configure_file(font1_2_test.data font2_0_test.data COPYONLY)
 # font3 (font3_0 is the same as font1_2)
 configure_file(font1_2_test.data font3_0_test.data COPYONLY)
 
-#FIXME: font4
-
+# font4
+configure_file(font4_0_test.data font4_0_test.data COPYONLY)
 
