@@ -279,6 +279,65 @@ static void patch32_add(FILE* f, off_t offset, uint32_t delta) {
   return;
 }
 
+static uint32_t add_esp(FILE* f, uint32_t memory_offset, int32_t n) {
+  write8(f, mapExe(memory_offset), 0x81); memory_offset += 1;
+  write8(f, mapExe(memory_offset), 0xC4); memory_offset += 1;
+  write32(f, mapExe(memory_offset), (uint32_t)n); memory_offset += 4;
+  return memory_offset;
+}
+
+static uint32_t test_eax_eax(FILE* f, uint32_t memory_offset) {
+  write8(f, mapExe(memory_offset), 0x85); memory_offset += 1;
+  write8(f, mapExe(memory_offset), 0xC0); memory_offset += 1;
+  return memory_offset;
+}
+
+static uint32_t push_eax(FILE* f, uint32_t memory_offset) {
+  write8(f, mapExe(memory_offset), 0x50); memory_offset += 1;
+  return memory_offset;
+}
+
+static uint32_t push_edx(FILE* f, uint32_t memory_offset) {
+  write8(f, mapExe(memory_offset), 0x52); memory_offset += 1;
+  return memory_offset;
+}
+
+static uint32_t pop_edx(FILE* f, uint32_t memory_offset) {
+  write8(f, mapExe(memory_offset), 0x5A); memory_offset += 1;
+  return memory_offset;
+}
+
+static uint32_t push_u32(FILE* f, uint32_t memory_offset, uint32_t value) {
+  write8(f, mapExe(memory_offset), 0x68); memory_offset += 1;
+  write32(f, mapExe(memory_offset), value); memory_offset += 4;
+  return memory_offset;
+}
+
+static uint32_t call(FILE* f, uint32_t memory_offset, uint32_t address) {
+  write8(f, mapExe(memory_offset), 0xE8); memory_offset += 1;
+  write32(f, mapExe(memory_offset), address - (memory_offset + 4)); memory_offset += 4;
+  return memory_offset;
+}
+
+static uint32_t jmp(FILE* f, uint32_t memory_offset, uint32_t address) {
+  write8(f, mapExe(memory_offset), 0xE9); memory_offset += 1;
+  write32(f, mapExe(memory_offset), address - (memory_offset + 4)); memory_offset += 4;
+  return memory_offset;
+}
+
+static uint32_t jnz(FILE* f, uint32_t memory_offset, uint32_t address) {
+  write8(f, mapExe(memory_offset), 0x0F); memory_offset += 1;
+  write8(f, mapExe(memory_offset), 0x85); memory_offset += 1;
+  write32(f, mapExe(memory_offset), address - (memory_offset + 4)); memory_offset += 4;
+  return memory_offset;
+}
+
+static uint32_t retn(FILE* f, uint32_t memory_offset) {
+  write8(f, mapExe(memory_offset), 0xC3); memory_offset += 1;
+  return memory_offset;
+}
+
+
 int main(int argc, char* argv[]) {
 
   FILE* f = fopen(argv[1], "rb+");
@@ -358,7 +417,7 @@ int main(int argc, char* argv[]) {
   memory_offset += read32(f, 260);
 
 
-#if 1
+#if 0
   memory_offset = patchTextureTable(f, memory_offset, 0x4BF91C, 0x42D745, 0x42D753, 512, 1024, "font0");  
   memory_offset = patchTextureTable(f, memory_offset, 0x4BF7E4, 0x42D786, 0x42D794, 512, 1024, "font1");
   memory_offset = patchTextureTable(f, memory_offset, 0x4BF84C, 0x42D7C7, 0x42D7D5, 512, 1024, "font2");
@@ -375,7 +434,7 @@ int main(int argc, char* argv[]) {
   dumpTextureTable(f, 0x4BF984, 3, 0, 64, 128, "font4");
 #endif
 
-#if 1
+#if 0
   // Upgrade network play updates to 100%
 
   // Patch the game GUID so people don't cheat with it (as easily):
@@ -477,7 +536,7 @@ write8(f, mapExe(0x45B765 + 6), 0x90);
 
 #endif
 
-#if 1
+#if 0
 
   // Patch audio streaming quality
 
@@ -497,6 +556,123 @@ write8(f, mapExe(0x45B765 + 6), 0x90);
   write32(f, mapExe(0x423549), buffer_size / 2);
   write32(f, mapExe(0x42354E), buffer_size / 2);
   write32(f, mapExe(0x423555), buffer_size / 2);
+
+#endif
+
+#if 1
+
+  // Replace the sprite loader with a version that checks for "data\\images\\sprite-%d.tga"
+
+  // Write the path we want to use to the binary
+  const char* tga_path = "data\\sprites\\sprite-%d.tga";
+
+  fseek(f, mapExe(memory_offset), SEEK_SET);
+
+  uint32_t memory_offset_tga_path = memory_offset;
+  fwrite(tga_path, strlen(tga_path) + 1, 1, f);
+  memory_offset += strlen(tga_path) + 1;
+
+
+
+// FIXME: load_success: Yay! Shift down size, to compensate for higher resolution
+uint32_t memory_offset_load_success = memory_offset;
+#if 1
+
+// Shift the width and height of the sprite to the right
+#if 1
+write8(f, mapExe(memory_offset), 0x66); memory_offset += 1;
+write8(f, mapExe(memory_offset), 0xC1); memory_offset += 1;
+write8(f, mapExe(memory_offset), 0x68); memory_offset += 1;
+write8(f, mapExe(memory_offset), 0); memory_offset += 1;
+write8(f, mapExe(memory_offset), 1); memory_offset += 1;
+
+write8(f, mapExe(memory_offset), 0x66); memory_offset += 1;
+write8(f, mapExe(memory_offset), 0xC1); memory_offset += 1;
+write8(f, mapExe(memory_offset), 0x68); memory_offset += 1;
+write8(f, mapExe(memory_offset), 2); memory_offset += 1;
+write8(f, mapExe(memory_offset), 2); memory_offset += 1;
+
+write8(f, mapExe(memory_offset), 0x66); memory_offset += 1;
+write8(f, mapExe(memory_offset), 0xC1); memory_offset += 1;
+write8(f, mapExe(memory_offset), 0x68); memory_offset += 1;
+write8(f, mapExe(memory_offset), 14); memory_offset += 1;
+write8(f, mapExe(memory_offset), 2); memory_offset += 1;
+#endif
+
+// Get address of page and repeat steps
+write8(f, mapExe(memory_offset), 0x8B); memory_offset += 1;
+write8(f, mapExe(memory_offset), 0x50); memory_offset += 1;
+write8(f, mapExe(memory_offset), 16); memory_offset += 1;
+
+#if 1
+write8(f, mapExe(memory_offset), 0x66); memory_offset += 1;
+write8(f, mapExe(memory_offset), 0xC1); memory_offset += 1;
+write8(f, mapExe(memory_offset), 0x6A); memory_offset += 1;
+write8(f, mapExe(memory_offset), 0); memory_offset += 1;
+write8(f, mapExe(memory_offset), 1); memory_offset += 1;
+
+write8(f, mapExe(memory_offset), 0x66); memory_offset += 1;
+write8(f, mapExe(memory_offset), 0xC1); memory_offset += 1;
+write8(f, mapExe(memory_offset), 0x6A); memory_offset += 1;
+write8(f, mapExe(memory_offset), 2); memory_offset += 1;
+write8(f, mapExe(memory_offset), 2); memory_offset += 1;
+#endif
+
+// Get address of texture and repeat steps
+
+//0:  8b 50 10                mov    edx,DWORD PTR [eax+0x10]
+//3:  66 c1 6a 02 02          shr    WORD PTR [edx+0x2],0x2
+#endif
+
+// finish: Clear stack and return
+uint32_t memory_offset_finish = memory_offset;
+memory_offset = add_esp(f, memory_offset, 0x4 + 0x400);
+memory_offset = retn(f, memory_offset);
+
+// Start of actual code
+uint32_t memory_offset_tga_loader_code = memory_offset;
+
+// Read the sprite_index from stack
+//  -> mov     eax, [esp+4]
+write8(f, mapExe(memory_offset), 0x8B); memory_offset += 1;
+write8(f, mapExe(memory_offset), 0x44); memory_offset += 1;
+write8(f, mapExe(memory_offset), 0x24); memory_offset += 1;
+write8(f, mapExe(memory_offset), 0x04); memory_offset += 1;
+
+// Make room for sprintf buffer and keep the pointer in edx
+//  -> add     esp, -400h
+memory_offset = add_esp(f, memory_offset, -0x400);
+//  -> mov     edx, esp
+write8(f, mapExe(memory_offset), 0x89); memory_offset += 1;
+write8(f, mapExe(memory_offset), 0xE2); memory_offset += 1;
+
+// Generate the path, keep sprite_index on stack as we'll keep using it
+memory_offset = push_eax(f, memory_offset); // (sprite_index)
+memory_offset = push_u32(f, memory_offset, memory_offset_tga_path); // (fmt)
+memory_offset = push_edx(f, memory_offset); // (buffer)
+memory_offset = call(f, memory_offset, 0x49EB80); // sprintf
+memory_offset = pop_edx(f, memory_offset); // (buffer)
+memory_offset = add_esp(f, memory_offset, 0x4);
+
+// Attempt to load the TGA, then remove path from stack
+memory_offset = push_edx(f, memory_offset); // (buffer)
+memory_offset = call(f, memory_offset, 0x4114D0); // load_sprite_from_tga_and_add_loaded_sprite
+memory_offset = add_esp(f, memory_offset, 0x4);
+
+// Check if the load failed
+memory_offset = test_eax_eax(f, memory_offset);
+//  -> jnz load_success
+memory_offset = jnz(f, memory_offset, memory_offset_load_success);
+
+// Load failed, so load the original sprite (sprite-index still on stack)
+memory_offset = call(f, memory_offset, 0x446CA0); // load_sprite_internal
+
+//  -> jmp finish
+memory_offset = jmp(f, memory_offset, memory_offset_finish);
+
+
+// Install it by jumping from 0x446FB0 (and we'll return directly)
+jmp(f, 0x446FB0, memory_offset_tga_loader_code);
 
 #endif
 
