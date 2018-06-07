@@ -2,6 +2,11 @@ cmake_minimum_required(VERSION 3.0)
 
 add_executable(swe1r-patcher main.c)
 
+if (WIN32)
+  add_executable(swe1r-loader main.c)
+  target_compile_definitions(swe1r-loader PUBLIC -DLOADER=1)
+endif()
+
 # font0
 configure_file(font0_0_test.data font0_0_test.data COPYONLY)
 
