@@ -1,4 +1,5 @@
 cmake_minimum_required(VERSION 3.0)
+project(swe1r-patcher)
 
 add_executable(swe1r-patcher main.c)
 

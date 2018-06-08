@@ -1,0 +1,95 @@
+# shallow clone
+clone_depth: 10
+
+version: '{build}'
+
+os: Visual Studio 2017 Preview
+
+environment:
+  # Tell MSYS2 to inherit the current directory when starting the shell
+  CHERE_INVOKING: 1
+  matrix:
+    - platform: x86
+      BUILD_TYPE: mingw
+      MSYSTEM: MINGW32
+# The following platform is disabled because this config is broken.
+#    - platform: x86
+#      BUILD_TYPE: msvc
+
+configuration:
+  - Release
+
+install:
+  - git submodule update --init --recursive
+  - ps: |
+        if ($env:BUILD_TYPE -eq 'mingw') {
+          # redirect err to null to prevent warnings from becoming errors
+          C:\msys64\usr\bin\bash -lc "pacman --noconfirm -S mingw-w64-i686-cmake 2>&1"
+        }
+
+before_build:
+  - mkdir %BUILD_TYPE%_build
+  - cd %BUILD_TYPE%_build
+  - ps: |
+        if ($env:BUILD_TYPE -eq 'mingw') {
+          C:\msys64\usr\bin\bash.exe -lc "cmake -G 'MSYS Makefiles' -DCMAKE_BUILD_TYPE=Release .. 2>&1"
+        } else {
+          # redirect stderr and change the exit code to prevent powershell from cancelling the build if cmake prints a warning
+          cmd /C 'cmake -G "Visual Studio 15 2017 Win64" .. 2>&1 && exit 0'
+        }
+  - cd ..
+
+build_script:
+  - ps: |
+        if ($env:BUILD_TYPE -eq 'mingw') {
+          C:\msys64\usr\bin\bash.exe -lc 'mingw32-make -j4 -C mingw_build/ 2>&1'
+        } else {
+          msbuild msvc_build/swe1r-patcher.sln /maxcpucount /logger:"C:\Program Files\AppVeyor\BuildAgent\Appveyor.MSBuildLogger.dll"
+        }
+
+after_build:
+  - ps: |
+        $GITDATE = $(git show -s --date=short --format='%ad') -replace "-",""
+        $GITREV = $(git show -s --format='%h')
+
+        if ($env:BUILD_TYPE -eq 'mingw') {
+          $MINGW_BUILD_ZIP = "swe1r-patcher-mingw-x86-$GITDATE-$GITREV.zip" -replace " ", ""
+
+          # store the build information in env vars so we can use them as artifacts
+          $env:GITDATE = $GITDATE
+          $env:GITREV = $GITREV
+          $env:BUILD_ZIP = $MINGW_BUILD_ZIP
+
+          $CMAKE_SOURCE_DIR = "$env:APPVEYOR_BUILD_FOLDER"
+          $CMAKE_BINARY_DIR = "$CMAKE_SOURCE_DIR/mingw_build"
+          $RELEASE_DIST = "mingw_dist"
+          mkdir $RELEASE_DIST
+
+          # copy the compiled binaries and other release files to the release folder
+          Get-ChildItem "$CMAKE_BINARY_DIR" -Recurse -Filter "*.data" | Copy-Item -destination $RELEASE_DIST
+          Get-ChildItem "$CMAKE_BINARY_DIR" -Recurse -Filter "swe1r-*.exe" | Copy-Item -destination $RELEASE_DIST
+          Copy-Item -path "$CMAKE_SOURCE_DIR/README.md" -destination $RELEASE_DIST
+
+          # Create a zip
+          7z a -tzip $MINGW_BUILD_ZIP $RELEASE_DIST\*
+        }
+
+
+artifacts:
+  - path: $(BUILD_ZIP)
+    name: build
+    type: zip
+
+deploy:
+  - provider: GitHub
+    tag: version-$(appveyor_build_version)
+    release: Version $(appveyor_build_version) for $(GITDATE)-$(GITREV)
+    description: Automatically created.
+    prerelease: true
+    repository: JayFoxRox/swe1r-patcher
+    auth_token:
+      secure: dt7LXTsIxqTkmXC0FdK7k7K23ifilaIvb0wFXCVDhrNk6u6myk6I0Zgz/FwQ1nFf
+    on:
+      appveyor_repo_tag: false
+      branch: master
+      BUILD_TYPE: mingw
