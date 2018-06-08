@@ -19,6 +19,33 @@
 
 #include <windows.h>
 
+static void display_error(const char* lpszFunction) {
+  // Retrieve the system error message for the last-error code
+
+  LPVOID lpMsgBuf;
+  DWORD dw = GetLastError();
+
+  FormatMessage(FORMAT_MESSAGE_ALLOCATE_BUFFER |
+                FORMAT_MESSAGE_FROM_SYSTEM |
+                FORMAT_MESSAGE_IGNORE_INSERTS,
+                NULL,
+                dw,
+                MAKELANGID(LANG_NEUTRAL, SUBLANG_DEFAULT),
+                (LPTSTR) &lpMsgBuf,
+                0, NULL );
+
+  // Display the error message and exit the process
+  char* lpDisplayBuf = malloc(lstrlen((LPCTSTR)lpMsgBuf) + strlen(lpszFunction) + 1024);
+
+  sprintf(lpDisplayBuf, "%s failed with error %d: %s", lpszFunction, dw, lpMsgBuf);
+  MessageBox(NULL, lpDisplayBuf, "Error", MB_OK);
+  free(lpDisplayBuf);
+
+  LocalFree(lpMsgBuf);
+
+  return;
+}
+
 typedef struct {
   PROCESS_INFORMATION process_information;
 } Target;
@@ -686,7 +713,7 @@ static uint32_t patch_trigger_display(Target target, uint32_t memory_offset) {
   write8(target, memory_offset, 0x4C); memory_offset += 1;
 
   // Read the section8.trigger_action field
-  //3:  0f b7 40 24             movzx  eax,WORD PTR [eax+0x24] 
+  //3:  0f b7 40 24             movzx  eax,WORD PTR [eax+0x24]
   write8(target, memory_offset, 0x0F); memory_offset += 1;
   write8(target, memory_offset, 0xB7); memory_offset += 1;
   write8(target, memory_offset, 0x40); memory_offset += 1;
@@ -745,6 +772,11 @@ int main(int argc, char* argv[]) {
   BOOL status = CreateProcess("swep1rcr.exe", cmd_line, NULL, NULL, FALSE, CREATE_SUSPENDED, NULL, NULL, &startup_info, &target.process_information);
 
   printf("Status: %d\n", status);
+
+  if (!status) {
+    display_error("CreateProcess");
+    return 1;
+  }
 
   //FIXME: Error handling
 
