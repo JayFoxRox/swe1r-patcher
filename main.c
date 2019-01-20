@@ -19,6 +19,27 @@
 
 #include <windows.h>
 
+#ifdef DLL
+
+typedef void* Target;
+
+static void writex(Target target, off_t offset, const void* data, size_t size) {
+  //MessageBoxA(NULL, "Meep", "Meep X", 0);
+  void* address = (void*)(uintptr_t)offset;
+  DWORD old_protect;
+  VirtualProtect(address, size, PAGE_EXECUTE_READWRITE, &old_protect);
+  memcpy(address, data, size);
+  VirtualProtect(address, size, old_protect, &old_protect);
+  return;
+}
+
+static void readx(Target target, off_t offset, void* data, size_t size) {
+  memcpy(data, (void*)(uintptr_t)offset, size);
+  return;
+}
+
+#else
+
 typedef struct {
   PROCESS_INFORMATION process_information;
 } Target;
@@ -37,6 +58,8 @@ static void readx(Target target, off_t offset, void* data, size_t size) {
   ReadProcessMemory(target.process_information.hProcess, (void*)(uintptr_t)offset, data, size, NULL);
   return;
 }
+
+#endif
 
 #else
 
@@ -318,7 +341,7 @@ static uint32_t patchTextureTable(Target target, uint32_t memory_offset, uint32_
 
     // Load input texture to buffer
     char path[4096];
-    sprintf(path, "%s_%d_test.data", filename, i);
+    sprintf(path, "textures/%s_%d_test.data", filename, i);
     printf("Loading '%s'\n", path);
     FILE* ft = fopen(path, "rb");
     assert(ft != NULL);
@@ -725,13 +748,73 @@ static uint32_t patch_trigger_display(Target target, uint32_t memory_offset) {
   return memory_offset;
 }
 
+static void patch(Target target, uint32_t memory_offset) {
+#if 0
+  // This is a debug feature to dump the original font textures
+
+  dumpTextureTable(target, 0x4BF91C, 3, 0, 64, 128, "font0");
+  dumpTextureTable(target, 0x4BF7E4, 3, 0, 64, 128, "font1");
+  dumpTextureTable(target, 0x4BF84C, 3, 0, 64, 128, "font2");
+  dumpTextureTable(target, 0x4BF8B4, 3, 0, 64, 128, "font3");
+  dumpTextureTable(target, 0x4BF984, 3, 0, 64, 128, "font4");
+#endif
+
+
+// Start the actual patching
+
+#if 1
+  memory_offset = patchTextureTable(target, memory_offset, 0x4BF91C, 0x42D745, 0x42D753, 512, 1024, "font0");
+  memory_offset = patchTextureTable(target, memory_offset, 0x4BF7E4, 0x42D786, 0x42D794, 512, 1024, "font1");
+  memory_offset = patchTextureTable(target, memory_offset, 0x4BF84C, 0x42D7C7, 0x42D7D5, 512, 1024, "font2");
+  memory_offset = patchTextureTable(target, memory_offset, 0x4BF8B4, 0x42D808, 0x42D816, 512, 1024, "font3");
+  memory_offset = patchTextureTable(target, memory_offset, 0x4BF984, 0x42D849, 0x42D857, 512, 1024, "font4");
+#endif
+
+#if 1
+  uint8_t upgrade_levels[7]  = {    5,    5,    5,    5,    5,    5,    5 };
+  uint8_t upgrade_healths[7] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
+
+  memory_offset = patch_network_upgrades(target, memory_offset, upgrade_levels, upgrade_healths);
+#endif
+
+#if 1
+  memory_offset = patch_network_collisions(target, memory_offset);
+#endif
+
+#if 0
+  uint32_t samplerate = 22050 * 2;
+  uint8_t bits_per_sample = 16;
+  bool stereo = true;
+
+  memory_offset = patch_audio_stream_quality(target, memory_offset, samplerate, bits_per_sample, stereo);
+#endif
+
+#if 0
+  memory_offset = patch_sprite_loader_to_load_tga(target, memory_offset);
+#endif
+
+#if 1
+  memory_offset = patch_trigger_display(target, memory_offset);
+#endif
+
+  // Dump out the network GUID
+
+  printf("Network GUID is: ");
+  for(int i = 0; i < 16; i++) {
+    printf("%02X", read8(target, 0x4AF9B0 + i));
+  }
+  printf("\n"); 
+}
+
+// Allocate more space, say... 4MB?
+// (we use the .rsrc section, which is last in memory)
+uint32_t patch_size = 4 * 1024 * 1024;
+
+#ifndef DLL
+
 int main(int argc, char* argv[]) {
 
   Target target;
-
-  // Allocate more space, say... 4MB?
-  // (we use the .rsrc section, which is last in memory)
-  uint32_t patch_size = 4 * 1024 * 1024;
 
   //FIXME: Retrieve this somehow
   uint32_t image_base = 0x400000;
@@ -862,61 +945,7 @@ int main(int argc, char* argv[]) {
 
 #endif
 
-#if 0
-  // This is a debug feature to dump the original font textures
-
-  dumpTextureTable(target, 0x4BF91C, 3, 0, 64, 128, "font0");
-  dumpTextureTable(target, 0x4BF7E4, 3, 0, 64, 128, "font1");
-  dumpTextureTable(target, 0x4BF84C, 3, 0, 64, 128, "font2");
-  dumpTextureTable(target, 0x4BF8B4, 3, 0, 64, 128, "font3");
-  dumpTextureTable(target, 0x4BF984, 3, 0, 64, 128, "font4");
-#endif
-
-
-// Start the actual patching
-
-#if 1
-  memory_offset = patchTextureTable(target, memory_offset, 0x4BF91C, 0x42D745, 0x42D753, 512, 1024, "font0");
-  memory_offset = patchTextureTable(target, memory_offset, 0x4BF7E4, 0x42D786, 0x42D794, 512, 1024, "font1");
-  memory_offset = patchTextureTable(target, memory_offset, 0x4BF84C, 0x42D7C7, 0x42D7D5, 512, 1024, "font2");
-  memory_offset = patchTextureTable(target, memory_offset, 0x4BF8B4, 0x42D808, 0x42D816, 512, 1024, "font3");
-  memory_offset = patchTextureTable(target, memory_offset, 0x4BF984, 0x42D849, 0x42D857, 512, 1024, "font4");
-#endif
-
-#if 1
-  uint8_t upgrade_levels[7]  = {    5,    5,    5,    5,    5,    5,    5 };
-  uint8_t upgrade_healths[7] = { 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF };
-
-  memory_offset = patch_network_upgrades(target, memory_offset, upgrade_levels, upgrade_healths);
-#endif
-
-#if 1
-  memory_offset = patch_network_collisions(target, memory_offset);
-#endif
-
-#if 1
-  uint32_t samplerate = 22050 * 2;
-  uint8_t bits_per_sample = 16;
-  bool stereo = true;
-
-  memory_offset = patch_audio_stream_quality(target, memory_offset, samplerate, bits_per_sample, stereo);
-#endif
-
-#if 1
-  memory_offset = patch_sprite_loader_to_load_tga(target, memory_offset);
-#endif
-
-#if 1
-  memory_offset = patch_trigger_display(target, memory_offset);
-#endif
-
-  // Dump out the network GUID
-
-  printf("Network GUID is: ");
-  for(int i = 0; i < 16; i++) {
-    printf("%02X", read8(target, 0x4AF9B0 + i));
-  }
-  printf("\n");
+  patch(target, memory_offset);
 
 #ifdef LOADER
 
@@ -932,3 +961,41 @@ int main(int argc, char* argv[]) {
 
   return 0;
 }
+
+#else
+
+BOOL WINAPI DllMain(
+  HINSTANCE hinstDLL,
+  DWORD fdwReason,
+  LPVOID lpReserved
+) {
+  return TRUE;
+}
+
+HRESULT WINAPI DirectInputCreateA(uint32_t a, uint32_t b, uint32_t c, uint32_t d) {
+
+  static HRESULT(WINAPI *o_DirectInputCreateA)(uint32_t, uint32_t, uint32_t, uint32_t) = NULL;
+  if (o_DirectInputCreateA == NULL) {
+
+    Target target;
+    uint32_t memory_offset = (uintptr_t)VirtualAlloc(NULL, patch_size, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+   
+    patch(target, memory_offset);
+
+    HMODULE dll = LoadLibrary("c:/windows/system32/dinput.dll");
+    o_DirectInputCreateA = (void*)GetProcAddress(dll, "DirectInputCreateA");
+
+#if 0
+    char buf[1024];
+    sprintf(buf, "Hooked 0x%X", o_DirectInputCreateA);
+    MessageBoxA(NULL, buf, "swe1r-patcher", 0);
+#endif
+
+  }
+
+  return o_DirectInputCreateA(a, b, c, d);
+}
+
+#endif
+
+
