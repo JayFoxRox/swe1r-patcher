@@ -755,9 +755,11 @@ int main(int argc, char* argv[]) {
 
 #endif
 
+  //FIXME: Locate this properly
+  uint32_t coff_header = image_base + 212;
 
   // Read timestamp of binary to see which base version this is
-  uint32_t timestamp = read32(target, image_base + 216);
+  uint32_t timestamp = read32(target, coff_header + 4);
 
   //FIXME: Now set the correct pointers for this binary
   switch(timestamp) {
@@ -768,7 +770,8 @@ int main(int argc, char* argv[]) {
     return 1;
   }
 
-  assert(image_base == read32(target, image_base + 260));
+  uint32_t optional_header = coff_header + 20;
+  assert(image_base == read32(target, optional_header + 28));
 
 #ifdef LOADER
 
@@ -777,20 +780,44 @@ int main(int argc, char* argv[]) {
 
 #else
 
+  // Search for existing section
+  uint32_t size_of_optional_header = read16(target, coff_header + 16);
+  uint32_t section_header = optional_header + size_of_optional_header;
+  uint16_t section_count = read16(target, coff_header + 2);
+#if 1
+  for(int i = 0; i < section_count; i++) {
+    uint32_t old_section_header = section_header + i * 40;
+    uint32_t n1 = read32(target, old_section_header + 0);
+    uint32_t n2 = read32(target, old_section_header + 4);
+    if ((n1 == *(uint32_t*)"hack") && (n2 == 0x00000000)) {
+      fprintf(stderr, "This file had already been patched!\n"
+                      "This tool is unable to upgrade an existing patch.\n"
+                      "Please find an unmodified file.\n"
+                      "Aborting.\n");
+
+      //FIXME: Undo patches, and allow to continue
+
+      return 1;
+    }
+  }
+#endif
+
   // Get rough offset where we'll place our stuff
   fseek(target.f, 0, SEEK_END);
   uint32_t file_offset = ftell(target.f);
 
-  // Align offset to safe bound and create data
+  // Align offset to safe bound
   fseek(target.f, file_offset, SEEK_SET);
   file_offset = (file_offset + 0xFFF) & ~0xFFF;
+
+  // Append section data
   while(ftell(target.f) < (file_offset + patch_size)) {
     uint8_t dummy = 0x00;
     fwrite(&dummy, 1, 1, target.f);
   }
 
-  // Select a unused memory region and align it
-  uint32_t memory_offset = read32(target, image_base + 288);
+  // Select a unused memory region (after SizeOfImage) and align it
+  uint32_t memory_offset = read32(target, optional_header + 56);
   memory_offset = (memory_offset + 0xFFF) & ~0xFFF;
 
   // Create data for new section
@@ -802,28 +829,31 @@ int main(int argc, char* argv[]) {
   characteristics |= 0x80000000; // Writeable
 
   // Append a new section
-  write32(target, image_base + 576 + 40 + 0, *(uint32_t*)"hack");
-  write32(target, image_base + 576 + 40 + 4, 0x00000000);
-  write32(target, image_base + 576 + 40 + 8, patch_size);
-  write32(target, image_base + 576 + 40 + 12, memory_offset);
-  write32(target, image_base + 576 + 40 + 16, patch_size);
-  write32(target, image_base + 576 + 40 + 20, file_offset);
-  write32(target, image_base + 576 + 40 + 24, 0x00000000);
-  write32(target, image_base + 576 + 40 + 28, 0x00000000);
-  write32(target, image_base + 576 + 40 + 32, 0x00000000);
-  write32(target, image_base + 576 + 40 + 36, characteristics);
+  uint32_t size_of_headers = read32(target, optional_header + 60);
+  uint32_t new_section_header = section_header + section_count * 40;
+  assert((new_section_header + 40) <= (image_base + size_of_headers));
+  write32(target, new_section_header + 0, *(uint32_t*)"hack");
+  write32(target, new_section_header + 4, 0x00000000);
+  write32(target, new_section_header + 8, patch_size);
+  write32(target, new_section_header + 12, memory_offset);
+  write32(target, new_section_header + 16, patch_size);
+  write32(target, new_section_header + 20, file_offset);
+  write32(target, new_section_header + 24, 0x00000000);
+  write32(target, new_section_header + 28, 0x00000000);
+  write32(target, new_section_header + 32, 0x00000000);
+  write32(target, new_section_header + 36, characteristics);
 
   // Increment number of sections
-  patch16_add(target, image_base + 214, 1);
+  patch16_add(target, coff_header + 2, 1);
 
   // size of image
-  write32(target, image_base + 288, memory_offset + patch_size);
+  write32(target, optional_header + 56, memory_offset + patch_size);
 
   // size of code
-  patch32_add(target, image_base + 236, patch_size);
+  patch32_add(target, optional_header + 4, patch_size);
 
   // size of intialized data
-  patch32_add(target, image_base + 240, patch_size);
+  patch32_add(target, optional_header + 8, patch_size);
 
 
 
