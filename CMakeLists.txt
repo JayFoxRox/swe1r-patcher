@@ -29,5 +29,5 @@ configure_file(textures/font1_2_test.data textures/font3_0_test.data COPYONLY)
 configure_file(textures/font4_0_test.data textures/font4_0_test.data COPYONLY)
 
 # README.md
-configure_file(README.md README.md COPYONLY)
+configure_file(README.md README.txt NEWLINE_STYLE CRLF)
 
