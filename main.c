@@ -793,7 +793,7 @@ static void patch(Target target, uint32_t memory_offset) {
   memory_offset = patch_sprite_loader_to_load_tga(target, memory_offset);
 #endif
 
-#if 1
+#if 0
   memory_offset = patch_trigger_display(target, memory_offset);
 #endif
 
