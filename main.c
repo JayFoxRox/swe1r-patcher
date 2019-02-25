@@ -969,6 +969,12 @@ BOOL WINAPI DllMain(
   DWORD fdwReason,
   LPVOID lpReserved
 ) {
+  if (fdwReason == DLL_PROCESS_ATTACH) {
+    Target target;
+    uint32_t memory_offset = (uintptr_t)VirtualAlloc(NULL, patch_size, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
+   
+    patch(target, memory_offset);
+  }
   return TRUE;
 }
 
@@ -976,11 +982,6 @@ HRESULT WINAPI DirectInputCreateA(uint32_t a, uint32_t b, uint32_t c, uint32_t d
 
   static HRESULT(WINAPI *o_DirectInputCreateA)(uint32_t, uint32_t, uint32_t, uint32_t) = NULL;
   if (o_DirectInputCreateA == NULL) {
-
-    Target target;
-    uint32_t memory_offset = (uintptr_t)VirtualAlloc(NULL, patch_size, MEM_COMMIT | MEM_RESERVE, PAGE_EXECUTE_READWRITE);
-   
-    patch(target, memory_offset);
 
     HMODULE dll = LoadLibrary("c:/windows/system32/dinput.dll");
     o_DirectInputCreateA = (void*)GetProcAddress(dll, "DirectInputCreateA");
